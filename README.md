@@ -3,6 +3,22 @@
 Huella psicológica viva: 8 situaciones ambiguas → tu Espectro (visual +
 narrativa únicos) → enlace compartible → ecos anónimos que lo enriquecen.
 
+## Publicar una actualización (la app se actualiza sola)
+
+El archivo descargable (`app/dist/espectro.html`) es un *loader*: trae la
+app incluida (funciona sin conexión) y en segundo plano busca una versión
+más nueva en `app/live/` vía proxy de GitHub. Si la hay, la carga y toma el
+control sin que el usuario descargue nada.
+
+1. Haz tus cambios en `app/src/`.
+2. Sube la versión en `app/package.json` (ej. `1.1.0` → `1.2.0`).
+3. `cd app && npm run build && npm test`
+4. Sube a GitHub (rama `main`): cambian `app/live/` y `app/dist/`.
+5. Listo: al abrir la app con conexión, el loader compara
+   `app/live/version.js` con su versión y actualiza solo.
+
+Sin conexión, la app sigue funcionando con su versión incluida.
+
 ## Estado del proyecto
 
 - [x] **Fase 1 (contenido)** — 2026-10-19: 8 situaciones definitivas,
@@ -22,20 +38,23 @@ narrativa únicos) → enlace compartible → ecos anónimos que lo enriquecen.
       - Tests: 28/28 (scoring con fuerza bruta 4^8=65536 combinaciones,
         visual, eventos Nostr, y e2e en jsdom con relay simulado:
         quiz→resultado→vista pública→eco).
-- [ ] **Publicar en GitHub** — bloqueado: la sesión de GitHub del usuario
-      expiró; crear el repo `Marlonbet/Espectro` requiere su login
-      (la API devuelve 403).
-- [ ] **Probar relays desde Cuba** — pendiente del usuario: la parte
-      "viva" (publicar/recibir ecos) necesita al menos un relay Nostr
-      alcanzable sin VPN (misma prueba pendiente que ChatApp Nostr).
+- [x] **v1.1.0 — auto-actualización** — 2026-10-19: `dist/espectro.html`
+      es ahora un loader (144 KB): app incluida como fallback offline +
+      chequeo en segundo plano de `app/live/version.js` vía proxies
+      gh-proxy; si hay versión más nueva, carga `app/live/espectro-live.js`
+      y toma el control sin re-descargar. 32/32 tests.
+- [x] **Repo público** — 2026-10-19: https://github.com/Marlonbet/Espectro
+      (rama `main`). Distribución a Cuba vía proxies gh-proxy.
+- [x] **Relays validados** — 2026-10-19: el usuario reportó que todos los
+      relays Nostr conectan desde Cuba sin VPN. La parte "viva" funciona.
 
 ## Decisiones registradas
 
-- 2026-10-19: el brief propone Next.js + Supabase + Vercel, pero son
+- 2026-10-19: el brief proponía Next.js + Supabase + Vercel, pero son
   empresas de EE.UU. y las sanciones endurecidas el 2026-09-30 lo hacen
-  apuesta débil desde Cuba (mismo patrón que Render/Railway/Firebase:
-  probable necesidad de VPN incluso para el propio creador). Decisión
-  pendiente del usuario antes de crear el repo.
+  apuesta débil desde Cuba. Decisión del usuario: repo público en GitHub +
+  app como un solo archivo HTML (distribuida vía proxies gh-proxy) + ecos
+  anónimos sobre Nostr. Supabase/Vercel descartados para el MVP.
 - Contenido y scoring son agnósticos del stack: sirven para cualquier
   backend (Supabase, Nostr, SQLite propio).
 

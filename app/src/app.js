@@ -11,6 +11,111 @@ import {
   publishAs, ephemeralIdentity, encodeSpectrumRef, decodeSpectrumRef,
 } from './ecos.js';
 
+// Plantilla de pantallas (inyectada por boot()).
+const TEMPLATE = `
+
+  <!-- INICIO -->
+  <section id="pantalla-inicio" class="pantalla centro">
+    <div class="marca">Espectro</div>
+    <h1>Descubre tu Espectro.</h1>
+    <p class="sub">8 situaciones. Ninguna respuesta correcta. Al final, un retrato vivo de cómo procesas el mundo — que se enriquece cada vez que alguien reacciona a él.</p>
+    <button class="boton" id="btn-empezar">Revelar mi espectro</button>
+    <div class="aviso">Sin registro · ~4 minutos · Gratis</div>
+    <div class="pasos">
+      <div class="paso-item"><div class="num">1</div><div><b>Responde</b><br><span class="sub">8 situaciones ambiguas, una por pantalla.</span></div></div>
+      <div class="paso-item"><div class="num">2</div><div><b>Recibe</b><br><span class="sub">Tu espectro: imagen + narrativa únicas.</span></div></div>
+      <div class="paso-item"><div class="num">3</div><div><b>Comparte</b><br><span class="sub">Cada reacción deja un eco anónimo que hace crecer tu resultado.</span></div></div>
+    </div>
+    <div class="tarjeta">
+      <b>¿Tienes un código de espectro?</b>
+      <p class="sub">Pégalo aquí para ver el espectro de alguien y dejar tu eco.</p>
+      <input class="texto" id="input-codigo" placeholder="naddr1…" autocomplete="off">
+      <button class="boton secundario pequeno" id="btn-ver-codigo">Ver espectro</button>
+    </div>
+    <div><span class="enlace" id="link-mios">Mis espectros</span></div>
+    <div class="estado-relay" id="estado-relay"></div>
+  </section>
+
+  <!-- QUIZ -->
+  <section id="pantalla-quiz" class="pantalla" hidden>
+    <div class="paso" id="quiz-paso">1 / 8</div>
+    <div class="progreso"><div id="quiz-barra" style="width:0%"></div></div>
+    <div class="tarjeta">
+      <h2 id="quiz-titulo"></h2>
+      <p class="escena" id="quiz-escena"></p>
+      <p class="pregunta" id="quiz-pregunta"></p>
+      <div id="quiz-opciones"></div>
+    </div>
+  </section>
+
+  <!-- REVELANDO -->
+  <section id="pantalla-revelando" class="pantalla revelando" hidden>
+    <div class="marca">Espectro</div>
+    <h2>Tejiendo tu espectro<span class="puntos"></span></h2>
+    <p class="sub" id="revelando-frase">Leyendo entre tus respuestas…</p>
+  </section>
+
+  <!-- RESULTADO -->
+  <section id="pantalla-resultado" class="pantalla" hidden>
+    <div class="marca centro">Tu espectro</div>
+    <div id="resultado-visual"></div>
+    <h2 class="arquetipo-nombre centro" id="resultado-nombre"></h2>
+    <p class="arquetipo-epiteto centro" id="resultado-epiteto"></p>
+    <div class="dimensiones" id="resultado-dims"></div>
+    <div class="tarjeta">
+      <div class="bloque"><h3>Cómo procesas el mundo</h3><p id="narrativa-1"></p></div>
+      <div class="bloque"><h3>Tu tensión viva</h3><p id="narrativa-2"></p></div>
+      <div class="bloque"><h3>Lo que tus ecos revelan</h3><p id="narrativa-3"></p></div>
+    </div>
+    <div class="tarjeta">
+      <b>Comparte tu espectro</b>
+      <p class="sub">Quien abra tu código verá tu espectro y podrá dejar un eco anónimo. Cada eco lo hace crecer.</p>
+      <div class="codigo-caja">
+        <div class="codigo" id="codigo-compartir"></div>
+        <button class="boton pequeno" id="btn-copiar">Copiar</button>
+      </div>
+      <button class="boton secundario pequeno" id="btn-whatsapp">Compartir por WhatsApp</button>
+      <button class="boton secundario pequeno" id="btn-ver-ecos">Actualizar ecos</button>
+    </div>
+    <div class="tarjeta" id="caja-ecos" hidden>
+      <b>Ecos recibidos</b>
+      <div class="eco-contador" id="ecos-contador"></div>
+      <div id="ecos-textos"></div>
+    </div>
+    <div class="centro"><button class="boton secundario" id="btn-otro">Revelar otro espectro</button></div>
+    <p class="aviso centro">Tu espectro no es un diagnóstico. Es una huella de <i>este momento</i> de tu vida.</p>
+  </section>
+
+  <!-- PÚBLICA (espectro ajeno) -->
+  <section id="pantalla-publica" class="pantalla" hidden>
+    <div class="marca centro">Espectro</div>
+    <div id="publica-visual"></div>
+    <h2 class="arquetipo-nombre centro" id="publica-nombre"></h2>
+    <p class="arquetipo-epiteto centro" id="publica-epiteto"></p>
+    <p class="sub centro" id="publica-huella" style="font-style:italic"></p>
+    <div class="tarjeta">
+      <b>Este es el espectro de alguien. Míralo un momento…</b>
+      <p class="sub">¿Qué te provoca? Tu eco es anónimo y hará crecer su espectro.</p>
+      <div class="reacciones" id="eco-reacciones"></div>
+      <textarea class="texto" id="eco-texto" maxlength="140" placeholder="Déjale una resonancia anónima… (opcional)"></textarea>
+      <button class="boton" id="btn-enviar-eco" disabled>Dejar mi eco</button>
+      <p class="sub" id="eco-estado"></p>
+    </div>
+    <div class="centro">
+      <button class="boton secundario" id="btn-yo-tambien">Revelar mi propio espectro</button>
+    </div>
+  </section>
+
+  <!-- MIS ESPECTROS -->
+  <section id="pantalla-mios" class="pantalla" hidden>
+    <div class="marca">Espectro</div>
+    <h2>Mis espectros</h2>
+    <div class="lista-espectros" id="lista-mios"></div>
+    <div class="centro"><button class="boton secundario" id="btn-volver-inicio">Volver</button></div>
+  </section>
+
+`;
+
 const $ = (id) => document.getElementById(id);
 const LS_ID = 'espectro_nsec';
 const LS_MIOS = 'espectro_mios';
@@ -27,6 +132,7 @@ let identity = null;
 let quiz = null;
 let currentSpectrum = null; // {codigo, ownerPubkey, arquetipo, dims, narrativa, respuestas, eventId}
 let echoReaction = null;
+let statusTimer = null;
 
 function show(id) {
   for (const s of document.querySelectorAll('.pantalla')) s.hidden = s.id !== id;
@@ -352,7 +458,8 @@ function init() {
   ensureIdentity();
   initClient();
   renderRelayStatus();
-  setInterval(renderRelayStatus, 5000);
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = setInterval(renderRelayStatus, 5000);
   retryPending();
 
   $('btn-empezar').onclick = startQuiz;
@@ -376,4 +483,21 @@ function init() {
   show('pantalla-inicio');
 }
 
-document.addEventListener('DOMContentLoaded', init);
+const VERSION = '__APP_VERSION__';
+
+function boot() {
+  const appEl = document.getElementById('app');
+  if (!appEl) return;
+  // Estado limpio: permite re-arranque (takeover de versión live).
+  quiz = null; currentSpectrum = null; echoReaction = null;
+  appEl.innerHTML = TEMPLATE;
+  init();
+}
+
+function dispose() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  if (client) { try { client.close(); } catch {} client = null; }
+}
+
+// El loader y el bundle live usan este handle (el live lo sobrescribe).
+window.__espectroApp = { boot, dispose, version: VERSION };
