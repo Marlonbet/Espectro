@@ -19,6 +19,22 @@ control sin que el usuario descargue nada.
 
 Sin conexión, la app sigue funcionando con su versión incluida.
 
+## Cuentas (v1.2.0): usuario + contraseña, sin servidor
+
+- El usuario se registra con **usuario + contraseña** (mín. 8 caracteres).
+  La contraseña deriva la clave Nostr con scrypt (`espectro:v1:` + usuario
+  como salt): la misma cuenta → la misma identidad en cualquier
+  dispositivo, sin copiar claves de 63 caracteres y sin que la contraseña
+  salga nunca del teléfono.
+- El nombre se reclama publicando un evento de perfil
+  (`30078:espectro:perfil:<usuario>`); el reclamo más antiguo gana.
+- Entrar = derivar la clave y comprobar que coincide con el reclamo
+  publicado. Contraseña incorrecta → la clave no coincide → rechazo.
+- "Mis espectros" tiene **Sincronizar desde la red**: recupera tus
+  espectros publicados en otro dispositivo.
+- Límites honestos: **no hay recuperación de contraseña** (nadie la
+  guarda). Usuario de invitado sigue existiendo sin cuenta.
+
 ## Estado del proyecto
 
 - [x] **Fase 1 (contenido)** — 2026-10-19: 8 situaciones definitivas,

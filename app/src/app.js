@@ -10,6 +10,11 @@ import {
   buildEchoEvent, fetchEchoes, fetchSpectrum,
   publishAs, ephemeralIdentity, encodeSpectrumRef, decodeSpectrumRef,
 } from './ecos.js';
+import {
+  normalizeUsername, validatePassword, deriveSecretKey,
+  buildProfileEvent, fetchUsernameClaim, verifyCredentials, nsecOf,
+} from './cuentas.js';
+import { getPublicKey } from 'nostr-tools';
 
 // Plantilla de pantallas (inyectada por boot()).
 const TEMPLATE = `
@@ -17,6 +22,7 @@ const TEMPLATE = `
   <!-- INICIO -->
   <section id="pantalla-inicio" class="pantalla centro">
     <div class="marca">Espectro</div>
+    <div id="caja-sesion"></div>
     <h1>Descubre tu Espectro.</h1>
     <p class="sub">8 situaciones. Ninguna respuesta correcta. Al final, un retrato vivo de cómo procesas el mundo — que se enriquece cada vez que alguien reacciona a él.</p>
     <button class="boton" id="btn-empezar">Revelar mi espectro</button>
@@ -106,11 +112,29 @@ const TEMPLATE = `
     </div>
   </section>
 
+
+  <!-- CUENTA -->
+  <section id="pantalla-cuenta" class="pantalla centro" hidden>
+    <div class="marca">Espectro</div>
+    <h2 id="cuenta-titulo">Crea tu cuenta</h2>
+    <p class="sub" id="cuenta-sub"></p>
+    <div class="tarjeta" style="text-align:left">
+      <input class="texto" id="cuenta-usuario" placeholder="usuario" autocomplete="username" autocapitalize="off" spellcheck="false">
+      <input class="texto" id="cuenta-pass" type="password" placeholder="contraseña (mínimo 8 caracteres)" autocomplete="new-password">
+      <input class="texto" id="cuenta-pass2" type="password" placeholder="repite la contraseña" autocomplete="new-password" hidden>
+      <p class="sub" id="cuenta-error" style="color:#ff6b81;min-height:1.2em"></p>
+      <button class="boton" id="btn-cuenta-ok">Crear cuenta</button>
+      <div style="margin-top:14px" class="centro"><span class="enlace" id="link-cuenta-modo">Ya tengo cuenta: entrar</span></div>
+    </div>
+    <div class="centro"><button class="boton secundario" id="btn-cuenta-volver">Volver</button></div>
+  </section>
+
   <!-- MIS ESPECTROS -->
   <section id="pantalla-mios" class="pantalla" hidden>
     <div class="marca">Espectro</div>
     <h2>Mis espectros</h2>
     <div class="lista-espectros" id="lista-mios"></div>
+    <div class="centro"><button class="boton secundario pequeno" id="btn-sincronizar">Sincronizar desde la red</button></div>
     <div class="centro"><button class="boton secundario" id="btn-volver-inicio">Volver</button></div>
   </section>
 
@@ -121,6 +145,7 @@ const LS_ID = 'espectro_nsec';
 const LS_MIOS = 'espectro_mios';
 const LS_RELAYS = 'espectro_relays';
 const LS_PEND = 'espectro_pendientes';
+const LS_CUENTA = 'espectro_cuenta';
 
 const store = {
   get(k, fb) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } },
@@ -148,10 +173,19 @@ function setAccent(dims) {
 // ---------- Identidad y red ----------
 
 function ensureIdentity() {
+  const cuenta = store.get(LS_CUENTA, null);
+  if (cuenta && cuenta.nsec) {
+    try { identity = importIdentity(cuenta.nsec); identity.username = cuenta.username; return; } catch {}
+  }
   const nsec = store.get(LS_ID, null);
   if (nsec) { try { identity = importIdentity(nsec); return; } catch {} }
   identity = createIdentity('viajero');
   store.set(LS_ID, identity.nsec);
+}
+
+function reconnectClient() {
+  if (client) { try { client.close(); } catch {} }
+  initClient();
 }
 
 function getRelays() {
@@ -208,6 +242,130 @@ async function retryPending() {
     } catch { rest.push(p); }
   }
   store.set(LS_PEND, rest);
+}
+
+
+// ---------- Cuentas (usuario + contraseña) ----------
+
+let cuentaModo = 'registro'; // 'registro' | 'login'
+
+function session() { return store.get(LS_CUENTA, null); }
+
+function renderSesion() {
+  const box = $('caja-sesion');
+  if (!box) return;
+  const s = session();
+  if (s && s.username) {
+    box.innerHTML = `<p class="sub">Hola, <b>${escapeHtml(s.username)}</b> · <span class="enlace" id="link-salir">salir</span></p>`;
+    $('link-salir').onclick = salir;
+  } else {
+    box.innerHTML = `<p class="sub"><span class="enlace" id="link-cuenta">Crear cuenta / Entrar</span></p>`;
+    $('link-cuenta').onclick = () => openCuenta('registro');
+  }
+}
+
+function openCuenta(modo) {
+  cuentaModo = modo;
+  const login = modo === 'login';
+  $('cuenta-titulo').textContent = login ? 'Entra a tu cuenta' : 'Crea tu cuenta';
+  $('cuenta-sub').textContent = login
+    ? 'Tu usuario y contraseña regeneran tu identidad secreta en este dispositivo.'
+    : 'Tu usuario y contraseña generan tu identidad secreta. No la guardamos en ningún servidor: si la olvidas, no hay forma de recuperarla. Anótala en un lugar seguro.';
+  $('cuenta-pass2').hidden = login;
+  $('btn-cuenta-ok').textContent = login ? 'Entrar' : 'Crear cuenta';
+  $('link-cuenta-modo').textContent = login ? 'No tengo cuenta: crear una' : 'Ya tengo cuenta: entrar';
+  $('cuenta-error').textContent = '';
+  $('cuenta-usuario').value = '';
+  $('cuenta-pass').value = '';
+  $('cuenta-pass2').value = '';
+  show('pantalla-cuenta');
+}
+
+function setIdentityFromSession(username, nsec) {
+  store.set(LS_CUENTA, { username, nsec });
+  identity = importIdentity(nsec);
+  identity.username = username;
+  reconnectClient();
+  renderSesion();
+}
+
+function salir() {
+  store.set(LS_CUENTA, null);
+  ensureIdentity();
+  reconnectClient();
+  renderSesion();
+  show('pantalla-inicio');
+}
+
+async function doCuenta() {
+  const btn = $('btn-cuenta-ok');
+  let username, password;
+  try {
+    username = normalizeUsername($('cuenta-usuario').value);
+    password = $('cuenta-pass').value;
+    validatePassword(password);
+    if (cuentaModo === 'registro' && password !== $('cuenta-pass2').value) {
+      throw new Error('Las contraseñas no coinciden.');
+    }
+  } catch (e) { $('cuenta-error').textContent = e.message; return; }
+  btn.disabled = true;
+  const labelOk = cuentaModo === 'registro' ? 'Crear cuenta' : 'Entrar';
+  btn.textContent = cuentaModo === 'registro' ? 'Creando tu identidad…' : 'Verificando…';
+  const fail = (msg) => { $('cuenta-error').textContent = msg; btn.disabled = false; btn.textContent = labelOk; };
+  try {
+    const sk = await deriveSecretKey(username, password);
+    const pubkey = getPublicKey(sk);
+    const claim = await fetchUsernameClaim(client, username);
+    if (cuentaModo === 'registro') {
+      if (claim && claim.pubkey !== pubkey) {
+        fail('Ese usuario ya existe. Si es tuyo, entra en vez de crearlo.');
+        return;
+      }
+      // Reclama el nombre firmando con la clave derivada (no la de invitado).
+      await publishAs(client, sk, buildProfileEvent(username), { timeoutMs: 15000 });
+    } else {
+      if (!claim) { fail('Ese usuario no existe todavía. ¿Quisiste crear una cuenta?'); return; }
+      if (!verifyCredentials(pubkey, claim)) { fail('La contraseña no es correcta.'); return; }
+    }
+    setIdentityFromSession(username, nsecOf(sk));
+    show('pantalla-inicio');
+  } catch (e) {
+    fail('Sin conexión a la red. Reintenta en un momento.');
+  }
+  btn.disabled = false;
+  btn.textContent = labelOk;
+}
+
+async function sincronizarMios() {
+  const btn = $('btn-sincronizar');
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  try {
+    const vistos = [];
+    const sub = client.subscribe(
+      [{ kinds: [30078], authors: [identity.pubkey], '#t': ['espectro'], limit: 50 }],
+      (ev) => { const p = parseSpectrumEvent(ev); if (p) vistos.push(p); }
+    );
+    await sub.eose();
+    sub.unsub();
+    const mios = store.get(LS_MIOS, []);
+    let nuevos = 0;
+    for (const p of vistos) {
+      if (!mios.some((m) => m.codigo === p.codigo)) {
+        mios.unshift({
+          codigo: p.codigo, ownerPubkey: p.ownerPubkey,
+          arquetipo: { id: p.arquetipo, nombre: p.nombre, epiteto: p.epiteto, slug: p.codigo.split('-')[0] },
+          dims: p.dims, narrativa: p.narrativa, respuestas: p.respuestas,
+          eventId: p.eventId, creado: p.creado, publicado: true,
+        });
+        nuevos++;
+      }
+    }
+    store.set(LS_MIOS, mios.slice(0, 20));
+    btn.textContent = nuevos ? `${nuevos} recuperados` : 'Al día';
+  } catch { btn.textContent = 'Sin conexión'; }
+  renderMine();
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Sincronizar desde la red'; }, 2500);
 }
 
 // ---------- Quiz ----------
@@ -477,6 +635,11 @@ function init() {
   };
   $('btn-ver-ecos').onclick = refreshEchoes;
   $('btn-enviar-eco').onclick = sendEcho;
+  $('link-cuenta-modo').onclick = () => openCuenta(cuentaModo === 'registro' ? 'login' : 'registro');
+  $('btn-cuenta-ok').onclick = doCuenta;
+  $('btn-cuenta-volver').onclick = () => show('pantalla-inicio');
+  $('btn-sincronizar').onclick = sincronizarMios;
+  renderSesion();
 
   const h = location.hash.match(/#s=(.+)/);
   if (h) { try { openPublic(decodeURIComponent(h[1])); return; } catch {} }
