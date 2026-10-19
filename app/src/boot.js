@@ -1,7 +1,12 @@
 // ESPECTRO loader: arranca la versión incluida al instante (offline-first)
 // y en segundo plano busca una versión más nueva vía proxies de GitHub.
-// Si la hay, la carga y toma el control. El archivo descargado no necesita
-// re-descargarse: las mejoras llegan solas.
+//
+// Cómo se actualiza (v1.2.1+): descarga el texto con fetch, VERIFICA que
+// sea código válido y recién entonces lo ejecuta como script en línea.
+// Así un proxy que devuelva basura (página de error, challenge) se
+// descarta en silencio, y si algo falla de verdad el error sale con su
+// mensaje real (nunca más el "Script error" enmascarado).
+// Diagnóstico: window.__espectroUpdateLog (ver en consola).
 (function () {
   var BUNDLED_VERSION = '__BUNDLED_VERSION__';
   var PROXIES = [
@@ -10,6 +15,11 @@
     'https://hub.gitmirror.com/',
   ];
   var LIVE_BASE = 'https://raw.githubusercontent.com/Marlonbet/Espectro/main/app/live/';
+  var log = (window.__espectroUpdateLog = []);
+
+  function note(msg) {
+    try { log.push(new Date().toISOString().slice(11, 19) + ' ' + msg); } catch (e) {}
+  }
 
   function cmp(a, b) {
     var pa = String(a).split('.').map(Number);
@@ -21,53 +31,74 @@
     return 0;
   }
 
-  function loadScript(src, timeoutMs) {
+  function fetchText(url, timeoutMs) {
     return new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      var done = false;
-      var timer = setTimeout(function () { finish(new Error('timeout')); }, timeoutMs);
-      function finish(err) {
-        if (done) return; done = true;
-        clearTimeout(timer);
-        if (s.parentNode) s.parentNode.removeChild(s);
-        if (err) reject(err); else resolve();
-      }
-      s.onload = function () { finish(); };
-      s.onerror = function () { finish(new Error('load error')); };
-      s.src = src;
-      document.head.appendChild(s);
+      if (typeof fetch === 'undefined') { reject(new Error('sin fetch')); return; }
+      var ctrl;
+      try { ctrl = new AbortController(); } catch (e) { reject(e); return; }
+      var timer = setTimeout(function () {
+        try { ctrl.abort(); } catch (e) {}
+        reject(new Error('timeout'));
+      }, timeoutMs);
+      fetch(url, { signal: ctrl.signal }).then(function (res) {
+        if (!res.ok) throw new Error('http ' + res.status);
+        return res.text();
+      }).then(function (t) { clearTimeout(timer); resolve(t); })
+        .catch(function (e) { clearTimeout(timer); reject(e); });
     });
+  }
+
+  function validVersionText(t) {
+    var m = /^\s*window\.__ESPECTRO_REMOTE_VERSION\s*=\s*"(\d+\.\d+\.\d+)"\s*;\s*$/.exec(t || '');
+    return m ? m[1] : null;
+  }
+
+  function validLiveText(t) {
+    return typeof t === 'string' && t.length > 50000 &&
+      t.indexOf('__espectroApp') !== -1 &&
+      t.charAt(0) !== '<' && t.indexOf('<!DOCTYPE') === -1 && t.indexOf('<html') === -1;
+  }
+
+  function runInline(code) {
+    var s = document.createElement('script');
+    s.textContent = code;
+    document.head.appendChild(s);
+    s.parentNode.removeChild(s);
   }
 
   function start() {
     var fallback = window.__espectroApp;
-    if (!fallback || !fallback.boot) return;
+    if (!fallback || !fallback.boot) { note('sin app incluida'); return; }
     fallback.boot();
 
-    // Chequeo de actualización en segundo plano: nunca bloquea la UI.
-    // Solo toma el control si el usuario está en la pantalla de inicio
-    // (no interrumpe un quiz a medias).
+    // Chequeo de actualización en segundo plano: nunca bloquea la UI y
+    // solo toma el control en la pantalla de inicio (no interrumpe un quiz).
     (async function () {
-      var cacheBust = 'v=' + Date.now();
+      var bust = 'v=' + Date.now();
       for (var i = 0; i < PROXIES.length; i++) {
         var base = PROXIES[i] + LIVE_BASE;
         try {
-          window.__ESPECTRO_REMOTE_VERSION = null;
-          await loadScript(base + 'version.js?' + cacheBust, 7000);
-          var remote = window.__ESPECTRO_REMOTE_VERSION;
-          window.__ESPECTRO_REMOTE_VERSION = null;
-          if (remote && cmp(remote, BUNDLED_VERSION) > 0) {
-            await loadScript(base + 'espectro-live.js?' + cacheBust, 30000);
-            var live = window.__espectroApp;
-            var inicio = document.getElementById('pantalla-inicio');
-            if (live && live !== fallback && live.version === remote && live.boot && inicio && !inicio.hidden) {
-              fallback.dispose();
-              live.boot();
-            }
+          note('probando ' + PROXIES[i]);
+          var remote = validVersionText(await fetchText(base + 'version.js?' + bust, 7000));
+          if (!remote) { note('version.js inválido, siguiente proxy'); continue; }
+          note('remoto=' + remote + ' local=' + BUNDLED_VERSION);
+          if (cmp(remote, BUNDLED_VERSION) <= 0) { note('al día'); return; }
+          var liveText = await fetchText(base + 'espectro-live.js?' + bust, 30000);
+          if (!validLiveText(liveText)) { note('live inválido, siguiente proxy'); continue; }
+          runInline(liveText);
+          var live = window.__espectroApp;
+          var inicio = document.getElementById('pantalla-inicio');
+          if (live && live !== fallback && live.version === remote && live.boot && inicio && !inicio.hidden) {
+            note('takeover a ' + remote);
+            fallback.dispose();
+            live.boot();
+          } else {
+            note('live cargado pero no tomó el control');
           }
-          return; // chequeo completado
-        } catch (e) { /* probar siguiente proxy */ }
+          return;
+        } catch (e) { note('falló: ' + (e && e.message)); }
       }
+      note('sin actualización');
     })();
   }
 

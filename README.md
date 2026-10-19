@@ -19,6 +19,12 @@ control sin que el usuario descargue nada.
 
 Sin conexión, la app sigue funcionando con su versión incluida.
 
+> **v1.2.1** — el actualizador ahora descarga el texto con `fetch`,
+> verifica que sea código válido y recién entonces lo ejecuta en línea.
+> Un proxy que devuelva basura se descarta en silencio; los errores reales
+> salen con su mensaje real. Diagnóstico en consola:
+> `window.__espectroUpdateLog`.
+
 ## Cuentas (v1.2.0): usuario + contraseña, sin servidor
 
 - El usuario se registra con **usuario + contraseña** (mín. 8 caracteres).
